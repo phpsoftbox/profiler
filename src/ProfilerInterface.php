@@ -17,6 +17,12 @@ interface ProfilerInterface
 
     public function currentTrace(): ?ProfileTrace;
 
+    /**
+     * Закрывает текущую трассу, собирает sections и сохраняет её в хранилище.
+     *
+     * Трасса закрывается до сбора и сохранения: если collector или хранилище бросили исключение, оно пробрасывается,
+     * но следующий span начнёт новую трассу.
+     */
     public function finishTrace(): ?ProfileTrace;
 
     /**

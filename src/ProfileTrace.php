@@ -22,6 +22,11 @@ final class ProfileTrace
      */
     public const int DEFAULT_MAX_SPANS = 5000;
 
+    /**
+     * Предел числа mark по умолчанию: та же защита, что и для span.
+     */
+    public const int DEFAULT_MAX_MARKS = 5000;
+
     private readonly DateTimeImmutable $startedAt;
     private readonly int $startedAtNs;
     private readonly int $startMemory;
@@ -40,6 +45,8 @@ final class ProfileTrace
      */
     private array $marks = [];
 
+    private int $droppedMarks = 0;
+
     /**
      * @var array<string, array<string, mixed>>
      */
@@ -54,9 +61,14 @@ final class ProfileTrace
         private readonly string $type,
         private array $tags = [],
         private readonly int $maxSpans = self::DEFAULT_MAX_SPANS,
+        private readonly int $maxMarks = self::DEFAULT_MAX_MARKS,
     ) {
         if ($maxSpans < 0) {
             throw new InvalidArgumentException('Max spans must not be negative.');
+        }
+
+        if ($maxMarks < 0) {
+            throw new InvalidArgumentException('Max marks must not be negative.');
         }
 
         $this->startedAt = new DateTimeImmutable();
@@ -100,11 +112,11 @@ final class ProfileTrace
     }
 
     /**
-     * Были ли отброшены span из-за предела.
+     * Были ли отброшены span или mark из-за предела.
      */
     public function truncated(): bool
     {
-        return $this->droppedSpans > 0;
+        return $this->droppedSpans > 0 || $this->droppedMarks > 0;
     }
 
     public function droppedSpans(): int
@@ -112,11 +124,22 @@ final class ProfileTrace
         return $this->droppedSpans;
     }
 
+    public function droppedMarks(): int
+    {
+        return $this->droppedMarks;
+    }
+
     /**
      * @param array<string, mixed> $tags
      */
     public function addMark(string $name, array $tags = []): void
     {
+        if (count($this->marks) >= $this->maxMarks) {
+            $this->droppedMarks++;
+
+            return;
+        }
+
         $this->marks[] = [
             'name'      => $name,
             'offset_ms' => round((hrtime(true) - $this->startedAtNs) / 1_000_000, 3),
@@ -174,6 +197,7 @@ final class ProfileTrace
             'truncated'     => $this->truncated(),
             'dropped_spans' => $this->droppedSpans,
             'marks'         => $this->marks,
+            'dropped_marks' => $this->droppedMarks,
             'sections'      => $this->sections,
         ];
     }
