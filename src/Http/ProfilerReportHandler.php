@@ -6,6 +6,7 @@ namespace PhpSoftBox\Profiler\Http;
 
 use PhpSoftBox\Profiler\ProfilerInterface;
 use PhpSoftBox\Profiler\ProfilerStoreInterface;
+use PhpSoftBox\Profiler\TraceJson;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -13,11 +14,6 @@ use Psr\Http\Message\StreamFactoryInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
 use function is_string;
-use function json_encode;
-
-use const JSON_THROW_ON_ERROR;
-use const JSON_UNESCAPED_SLASHES;
-use const JSON_UNESCAPED_UNICODE;
 
 final readonly class ProfilerReportHandler implements RequestHandlerInterface
 {
@@ -60,9 +56,8 @@ final readonly class ProfilerReportHandler implements RequestHandlerInterface
      */
     private function json(array $payload, int $status = 200): ResponseInterface
     {
-        $body = $this->streamFactory->createStream(
-            json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-        );
+        // InMemory-хранилище отдаёт сырые теги трассы: не-UTF-8 и NAN/INF не должны ронять отчёт.
+        $body = $this->streamFactory->createStream(TraceJson::encode($payload));
 
         $response = $this->responseFactory
             ->createResponse($status)

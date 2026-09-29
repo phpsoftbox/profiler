@@ -41,16 +41,15 @@ foreach ($extensions as $extension) {
 }
 ```
 
-Пример ожидаемых extensions:
+Встроенные extensions пакетов фреймворка:
 
-- `PhpSoftBox\Database\Profiler\DatabaseProfilerExtension`;
-- `PhpSoftBox\Orm\Profiler\OrmProfilerExtension`;
-- `PhpSoftBox\Container\Profiler\ContainerProfilerExtension`;
-- `PhpSoftBox\Router\Profiler\RouterProfilerExtension`;
-- `PhpSoftBox\MultiTenant\Profiler\MultiTenantProfilerExtension`;
-- `PhpSoftBox\Inertia\Profiler\InertiaProfilerExtension`;
-- `PhpSoftBox\Cache\Profiler\CacheProfilerExtension`;
-- `PhpSoftBox\Resource\Profiler\ResourceProfilerExtension`.
+- `PhpSoftBox\Container\Profiler\ContainerProfilerExtension` — section `container`;
+- `PhpSoftBox\Database\Profiler\DatabaseProfilerExtension` — section `database`;
+- `PhpSoftBox\Router\Profiler\RouterProfilerExtension` — section `router`;
+- `PhpSoftBox\MultiTenant\Profiler\MultiTenantProfilerExtension` — section `multi_tenant`.
+
+Другие пакеты (ORM, Inertia, Cache, Resource) своих extensions не имеют; их участки можно измерять через
+`span()`/`mark()` или собственный collector.
 
 ## Память в долгих процессах
 
@@ -76,10 +75,35 @@ Collector очищается только в `startTrace()`, а при выкл�
 `RouterProfilerCollector` хранят не больше 5 000 записей (параметр конструктора `maxItems`). После предела
 растут только счётчики, а в `collect()` появляются `truncated: true` и `dropped` — число отброшенных записей.
 
-**Число span в trace ограничено.** `ProfileTrace` хранит не больше 5 000 span (`Profiler::__construct(maxSpans: ...)`).
-После предела span не сохраняются, в `toArray()` — `truncated: true` и `dropped_spans`. Это важно при
-включённом профайлере: `start()` без активной трассы сам открывает `application.lifecycle`, и в долгой
-dev-команде эту трассу никто не закрывает.
+**Число span и mark в trace ограничено.** `ProfileTrace` хранит не больше 5 000 span и 5 000 mark
+(`Profiler::__construct(maxSpans: ..., maxMarks: ...)`). После предела они не сохраняются, в `toArray()` —
+`truncated: true`, `dropped_spans` и `dropped_marks`. Это важно при включённом профайлере: `start()` и `mark()`
+без активной трассы сами открывают `application.lifecycle`, и в долгой dev-команде эту трассу никто не закрывает.
+
+## Хранилища
+
+Оба хранилища ограничены по размеру.
+
+**`InMemoryProfilerStore(maxTraces: 100)`** — последние трассы в памяти процесса. При переполнении вытесняется
+самая старая, поэтому воркер не растёт по памяти. `clear()` очищает хранилище целиком. Пакет не зависит от
+`phpsoftbox/container`, поэтому `ResetInterface` не реализует; сбрасывать хранилище после каждой задачи обычно
+не нужно — тогда панель не увидит предыдущие запросы. Если сброс всё же нужен, подключите `clear` в карту hooks
+`ServicesResetter` (`InMemoryProfilerStore::class => 'clear'`).
+
+**`FileProfilerStore($directory, maxTraces: 500, maxAgeSeconds: 86400)`** — трасса на файл
+`<время сохранения в мкс>-<id>.json`. После каждого сохранения удаляются трассы старше `maxAgeSeconds`
+(`null` — без ограничения по возрасту) и самые старые сверх `maxTraces`. Время в имени упорядочивает файлы:
+`latest()` берёт последние по имени без `filemtime()` каждого файла. Файл пишется через временный и `rename()`,
+повреждённые файлы `find()`/`latest()` пропускают. Id трассы — только `[A-Za-z0-9_]`.
+
+## Сбои сериализации и сохранения
+
+В теги попадают данные приложения (bindings SQL, ответы API), поэтому отчёт кодируется через `TraceJson`:
+не-UTF-8 байты заменяются на `U+FFFD`, `NAN`/`INF` и ресурсы — на `0`/`null` (`JSON_INVALID_UTF8_SUBSTITUTE`,
+`JSON_PARTIAL_OUTPUT_ON_ERROR`). Так кодируют `FileProfilerStore` и `ProfilerReportHandler`.
+
+`Profiler::finishTrace()` закрывает трассу до сбора sections и сохранения: если collector или хранилище бросили
+исключение, оно пробрасывается, но следующий span начнёт новую трассу.
 
 ## HTTP middleware
 
@@ -91,6 +115,11 @@ $app->add(ProfilerMiddleware::class);
 
 Middleware создает root trace `http.request`, добавляет `X-Profile-Id` и
 `Server-Timing`.
+
+Профайлер не влияет на результат запроса. Если сбор или сохранение трассы упали, ответ отдаётся без
+`X-Profile-Id` и `Server-Timing`, а сбой пишется в лог уровня `warning`, если передан logger
+(`new ProfilerMiddleware($profiler, $logger)`). Исключение обработчика пробрасывается как есть, сбой профайлера
+его не подменяет.
 
 ## JSON API
 
@@ -129,4 +158,4 @@ import { DebugProvider, ProfilerDebugPanel } from '@phpsoftbox/profiler-js';
 ```
 
 `@phpsoftbox/profiler-js` читает report по `trace_id`, показывает timeline и
-компонентные sections: `database`, `orm`, `container`, `router`, `multi_tenant`, `inertia`.
+компонентные sections: `database`, `container`, `router`, `multi_tenant`.

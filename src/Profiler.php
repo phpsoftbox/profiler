@@ -28,6 +28,7 @@ final class Profiler implements ProfilerInterface
         private readonly ?ProfilerStoreInterface $store = null,
         private readonly ?ProfilerRegistryInterface $registry = null,
         private readonly int $maxSpans = ProfileTrace::DEFAULT_MAX_SPANS,
+        private readonly int $maxMarks = ProfileTrace::DEFAULT_MAX_MARKS,
     ) {
     }
 
@@ -49,7 +50,7 @@ final class Profiler implements ProfilerInterface
 
         $this->registry?->reset();
         $this->spanStack = [];
-        $this->trace     = new ProfileTrace($this->newId(), $name, $type, $tags, $this->maxSpans);
+        $this->trace     = new ProfileTrace($this->newId(), $name, $type, $tags, $this->maxSpans, $this->maxMarks);
 
         return $this->trace;
     }
@@ -72,10 +73,13 @@ final class Profiler implements ProfilerInterface
 
         $trace = $this->trace;
         $trace->finish();
-        $trace->setSections($this->registry?->collect($trace) ?? []);
 
-        $this->store?->save($trace);
+        // Трасса закрывается до сбора и сохранения: сбой collector или хранилища не оставляет её открытой,
+        // и следующие span не дописываются в уже завершённую трассу.
         $this->trace = null;
+
+        $trace->setSections($this->registry?->collect($trace) ?? []);
+        $this->store?->save($trace);
 
         return $trace;
     }
